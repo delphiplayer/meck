@@ -7,7 +7,7 @@ This program will help:
                           and match a MAC address to a vendor in this list
 
 positional arguments:
-  mac         search for MAC address in your list file (my_mac_addresses.txt) - NOt cASe Sensitive
+mac         search for MAC address in your list file (my_mac_addresses.txt) - NOt cASe Sensitive
               	Example: meck 1C:74:0D:11:22:33
               	==> Zyxel Communications Corporation
               	or
