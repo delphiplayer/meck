@@ -1,0 +1,191 @@
+#!/usr/bin/env python
+import os
+import argparse
+import requests
+import re
+import sys
+
+addresses_file='my_mac_addresses.txt'
+vendors_file='mac_vendors.txt'
+vendors_file_raw='oui.txt'
+url="http://standards.ieee.org/develop/regauth/oui/oui.txt"
+
+
+def parse_options():
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
+        usage='use "%(prog)s --help" for more information',
+        description='''This program will help:
+                        - identify a MAC address against a list of adresses (default or passed)
+                        - download and create a list of MAC addresses of vendors
+                          and match a MAC address to a vendor in this list''',
+        epilog="Free for use, but it's {up to|on} you. Enjoy:-)")
+
+    parser.add_argument(
+        "mac",
+        nargs='?',
+        help=("search for MAC address in your list file (my_mac_addresses.txt) - NOt cASe Sensitive\n"
+              "\tExample: meck 1C:74:0D:11:22:33\n"
+              "\t==> Zyxel Communications Corporation\n"
+              "\tor\n"
+              "\tExample: meck 1C740D112233\n"
+              "\t==> Zyxel Communications Corporation\n"
+              "\n"
+              "List example: {MAC address}\t{Adapter}\t{Name}\n"
+              "1C:74:0D:11:22:33\t\twlan\thome_router\n"
+))
+
+    parser.add_argument(
+        "-f",
+        help=("set an other MAC address list and print it\n"
+              "\tExample: meck -f other_list_of_mac_addresses.txt 1C:74:0D:11:22:33\n"
+              "\t==> Zyxel Communications Corporation"))
+
+    parser.add_argument(
+        "-u",
+        action='store_true',
+        help="update MAC vendor list from "+url)
+
+    parser.add_argument(
+        "-v",
+        help=("get MAC vendor name\n"
+              "\tExample: meck -v 1C:74:0D:11:22:33\n"
+              "\t==> Zyxel Communications Corporation"))
+
+    return parser.parse_args()
+
+          
+def GetMacVendorFile():
+ with open(vendors_file_raw, "wb") as f:
+        print "Downloading %s" % url
+        try:
+         response = requests.get(url, stream=True)
+         total_length = response.headers.get('content-length')
+         tl=str(round(float(total_length)/1000000, 3))
+         if total_length is None: # no content length header
+            f.write(response.content)
+         else:
+            dl = 0
+            total_length = int(total_length)
+            for data in response.iter_content(chunk_size=4096):
+                dl += len(data)
+                f.write(data)
+                done = int(100 * dl / total_length)
+                sys.stdout.write("\r[%s%s]  %d%% of %s MB" % ('=' * done, ' ' * (100-done), done, tl) )    
+                sys.stdout.flush()
+            print "\nFile downloaded successfully.."
+            result=True
+        except:
+         result=False
+         print "Download failed, vendors list not updated.."
+ return result
+
+
+def ParseMacFile(file):
+ result=False
+ print("Parsing data..")
+ vendors_list = []
+ with open(vendors_file_raw, "r") as f:
+  for line in f:    
+    if "(hex)" not in line:
+     continue
+    ven = tuple(re.sub("\s*([0-9a-zA-Z]+)[\s\t]*\(hex\)[\s\t]*(.*)\n", r"\1;;\2", line).split(";;"))
+    vendor=(ven[0].replace('-',':'),ven[1])
+    vendors_list.append(vendor)
+  print len(vendors_list)," lines parsed.."
+  tl=len(vendors_list)
+  print "Writing new list to "+vendors_file
+  with open(file,'w') as f:
+   f.write('\n'.join('%s\t%s' % x for x in vendors_list))
+  result=True
+ return result
+
+
+def PrintMyMacs(file):
+ try:
+   with open(file,'r') as f:
+    print ""
+    for line in f:
+     PrintMAC(line.split())
+    print "" 
+ except:
+  sys.exit("The file is not in the expected format or something just went wrong. Exiting..")
+ 
+ 
+def FindMacInMyList(mac, file):
+ with open(file,'r') as f:
+  for line in f:
+   if line.split()[0].upper() in mac.upper():
+    PrintMAC(line.split())
+    return True  
+
+def PrintMAC(row):
+ print "{:<20} {:<10} {:<20}".format(row[0].upper(), row[1], row[2])
+
+
+def IsValidMac(mactocheck):
+ p = re.compile(ur'([0-9a-f]{2}(?::[0-9a-f]{2}){5})', re.IGNORECASE)
+ if re.match(p, mactocheck):
+  return mactocheck
+
+
+def ValidateMac(mactocheck):
+ p = re.compile(ur'([0-9a-f]{12})', re.IGNORECASE)
+ if re.match(p, mactocheck):
+  dissected_mac=map(''.join, zip(*[iter(mactocheck)]*2))
+  mac=':'.join(dissected_mac)
+  return(mac)
+ else: 
+  sys.exit("Not valid MAC address format")
+ 
+ 
+def GetVendorName(mac):
+ vmac=mac.upper()[:8]
+ with open(vendors_file,'r') as f:
+  for line in f:
+   if line.split("\t")[0] in vmac:
+    return line.split("\t")[1].rstrip()
+    
+  
+if __name__ == "__main__":
+ options = parse_options()
+ 
+ if options.u:
+  print("Updating MAC vendor list..")
+  if GetMacVendorFile():
+   if ParseMacFile(vendors_file):
+    print "Fresh list downloaded and saved to "+vendors_file
+    try:
+     os.remove(vendors_file_raw)
+    except:
+     print "Failed to remove temporary file "+vendors_file_raw
+     pass
+   else:
+    print("Something went wrong, new list not generated..")
+
+ if options.v:
+  if IsValidMac(options.v):
+   vendor=GetVendorName(options.v)
+   if vendor:
+    print(vendor)
+    sys.exit(0)
+   else:
+    sys.exit(1)
+  else:
+    sys.exit("Not valid MAC address format")  
+   
+ if options.f:
+   addresses_file = options.f if os.path.isfile(str(options.f)) else sys.exit("List file not found")
+   
+ if options.mac:
+  if IsValidMac(options.mac):
+   mac=options.mac
+  else:
+   mac=ValidateMac(options.mac)
+  if not mac:
+   sys.exit("Not valid MAC address format")
+  if not FindMacInMyList(mac, addresses_file):
+    sys.exit("MAC not found in your list")
+  sys.exit(0)
+  
+ if options.u==False:
+  PrintMyMacs(addresses_file)
